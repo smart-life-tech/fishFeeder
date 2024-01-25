@@ -2,14 +2,36 @@
 #include <Wire.h>
 #include <RTClib.h>
 #include <TimeAlarms.h>
-
+#include <BluetoothSerial.h>
 #define RELAY_PIN 2      // Replace with the actual pin connected to the relay
 #define SERVO_PIN 3      // Replace with the actual pin connected to the servo
 #define MAX_FEED_TIMES 4 // Maximum number of feed times
 
 RTC_DS3231 rtc;
-
+BluetoothSerial SerialBT;
 Servo dispenserServo;
+void processBluetoothData()
+{
+    String receivedData = SerialBT.readStringUntil('\n');
+
+    if (receivedData.startsWith("FEED"))
+    {
+        // Format: FEED HH:MM DURATION (e.g., FEED 06:00 10)
+        int spaceIndex1 = receivedData.indexOf(' ');
+        int spaceIndex2 = receivedData.indexOf(' ', spaceIndex1 + 1);
+        String timeStr = receivedData.substring(spaceIndex1 + 1, spaceIndex2);
+        String durationStr = receivedData.substring(spaceIndex2 + 1);
+
+        int hour = timeStr.substring(0, 2).toInt();
+        int minute = timeStr.substring(3).toInt();
+        int duration = durationStr.toInt();
+
+        if (feedCount < MAX_FEED_TIMES)
+        {
+            addFeedTime(hour, minute, duration);
+        }
+    }
+}
 
 struct FeedTime
 {
@@ -28,6 +50,8 @@ int feedCount = 0;                  // Variable to keep track of the number of f
 void setup()
 {
     Serial.begin(9600);
+    Serial.begin(9600);
+    SerialBT.begin("ESP32_BT"); // Bluetooth device name
 
     if (!rtc.begin())
     {
@@ -66,6 +90,10 @@ void setup()
 void loop()
 {
     Alarm.delay(1000); // Allow Alarms to trigger
+    if (SerialBT.available())
+    {
+        processBluetoothData();
+    }
 }
 
 time_t dailyAlarm(int hour, int minute, int second)
