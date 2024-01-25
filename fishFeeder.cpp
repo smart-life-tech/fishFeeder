@@ -1,4 +1,4 @@
-#include <Servo.h>
+#include <ESP32Servo.h>
 #include <Wire.h>
 #include <RTClib.h>
 #include <TimeAlarms.h>
@@ -10,6 +10,69 @@
 RTC_DS3231 rtc;
 BluetoothSerial SerialBT;
 Servo dispenserServo;
+
+struct FeedTime
+{
+    int hour;
+    int minute;
+    int duration;
+};
+
+FeedTime feedTimes[MAX_FEED_TIMES]; // Array to store feed times and durations
+int feedCount = 0;                  // Variable to keep track of the number of feed times
+
+time_t dailyAlarm(int hour, int minute, int second)
+{
+    DateTime now = rtc.now();
+    DateTime alarmTime = DateTime(now.year(), now.month(), now.day(), hour, minute, second);
+    if (now.unixtime() < alarmTime.unixtime())
+    {
+        alarmTime = alarmTime + TimeSpan(1, 0, 0, 0); // If the alarm time has already passed today, set it for tomorrow
+    }
+    return now.unixtime() + (alarmTime.unixtime() - now.unixtime());
+}
+void feed(int feedIndex)
+{
+    int feedDuration = feedTimes[feedIndex].duration;
+
+    digitalWrite(RELAY_PIN, HIGH); // Engage throwing motor
+    dispenserServo.write(0);       // Start the dispenser servo
+    delay(feedDuration * 1000);    // Wait for the specified feed duration
+    dispenserServo.write(90);      // Stop the dispenser servo
+    delay(3000);                   // Wait for 3 seconds before turning off the throwing motor
+    digitalWrite(RELAY_PIN, LOW);  // Turn off the throwing motor
+}
+/**
+ * Adds a feed time to the array if there is space.
+ *
+ * @param hour the hour of the feed time
+ * @param minute the minute of the feed time
+ * @param duration the duration of the feed time
+ *
+ * @return void
+ *
+ * @throws ErrorType none
+ */
+
+void addFeedTime(int hour, int minute, int duration)
+{
+    if (feedCount < MAX_FEED_TIMES)
+    {
+        feedTimes[feedCount].hour = hour;
+        feedTimes[feedCount].minute = minute;
+        feedTimes[feedCount].duration = duration;
+        feedCount++;
+    }
+}
+
+void feedCallback()
+{
+    int feedIndex = Alarm.getTriggeredAlarmId(); // Get the index of the triggered feed time
+    feed(feedIndex);
+}
+
+
+
 void processBluetoothData()
 {
     String receivedData = SerialBT.readStringUntil('\n');
@@ -32,16 +95,6 @@ void processBluetoothData()
         }
     }
 }
-
-struct FeedTime
-{
-    int hour;
-    int minute;
-    int duration;
-};
-
-FeedTime feedTimes[MAX_FEED_TIMES]; // Array to store feed times and durations
-int feedCount = 0;                  // Variable to keep track of the number of feed times
 
 /**
  * Function to set up the system, initialize pins, set default feed times,
@@ -96,53 +149,3 @@ void loop()
     }
 }
 
-time_t dailyAlarm(int hour, int minute, int second)
-{
-    DateTime now = rtc.now();
-    DateTime alarmTime = DateTime(now.year(), now.month(), now.day(), hour, minute, second);
-    if (now.unixtime() < alarmTime.unixtime())
-    {
-        alarmTime = alarmTime + TimeSpan(1, 0, 0, 0); // If the alarm time has already passed today, set it for tomorrow
-    }
-    return now.unixtime() + (alarmTime.unixtime() - now.unixtime());
-}
-
-/**
- * Adds a feed time to the array if there is space.
- *
- * @param hour the hour of the feed time
- * @param minute the minute of the feed time
- * @param duration the duration of the feed time
- *
- * @return void
- *
- * @throws ErrorType none
- */
-void addFeedTime(int hour, int minute, int duration)
-{
-    if (feedCount < MAX_FEED_TIMES)
-    {
-        feedTimes[feedCount].hour = hour;
-        feedTimes[feedCount].minute = minute;
-        feedTimes[feedCount].duration = duration;
-        feedCount++;
-    }
-}
-
-void feedCallback()
-{
-    int feedIndex = Alarm.getTriggeredAlarmId(); // Get the index of the triggered feed time
-    feed(feedIndex);
-}
-
-void feed(int feedIndex)
-{
-    int feedDuration = feedTimes[feedIndex].duration;
-
-    digitalWrite(RELAY_PIN, HIGH); // Engage throwing motor
-    dispenserServo.write(0);       // Start the dispenser servo
-    delay(feedDuration * 1000);    // Wait for the specified feed duration
-    dispenserServo.write(90);      // Stop the dispenser servo
-    delay(3000);                   // Wait for 3 seconds before turning off the throwing motor
-    digitalWrite(RELAY_PIN, LOW);  // Turn off the throwing motor
-}
