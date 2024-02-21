@@ -3,13 +3,27 @@
 #include <RTClib.h>
 #include <TimeAlarms.h>
 #include <BluetoothSerial.h>
-#define RELAY_PIN 2      // Replace with the actual pin connected to the relay
-#define SERVO_PIN 3      // Replace with the actual pin connected to the servo
-#define MAX_FEED_TIMES 4 // Maximum number of feed times
+#include <LiquidCrystal_I2C.h>
+
+#define RELAY_PIN 25      // Replace with the actual pin connected to the relay
+#define SERVO_PIN 34      // Replace with the actual pin connected to the servo
+#define MAX_FEED_TIMES 4  // Maximum number of feed times
+#define INC_BUTTON_PIN 14 // Increment button pin
+#define DEC_BUTTON_PIN 12 // Decrement button pin
+#define SET_BUTTON_PIN 26 // Set button pin
+
+// int buttonPin
+LiquidCrystal_I2C lcd(0x27, 16, 2); // I2C address, 16 columns, 2 rows
 
 RTC_DS3231 rtc;
 BluetoothSerial SerialBT;
 Servo dispenserServo;
+
+bool incButtonPressed = false;
+bool decButtonPressed = false;
+bool setButtonPressed = false;
+bool settingMode = false;
+int settingIndex = 0; // Index of the current setting being modified (0: hour, 1: minute, 2: duration)
 
 struct FeedTime
 {
@@ -19,7 +33,115 @@ struct FeedTime
 };
 
 FeedTime feedTimes[MAX_FEED_TIMES]; // Array to store feed times and durations
-int feedCount = 0;                  // Variable to keep track of the number of feed times
+int feedCount = 0;
+
+void displaySettingMode()
+{
+    lcd.clear();
+    switch (settingIndex)
+    {
+    case 0:
+        lcd.print("Set Hour: ");
+        lcd.print(feedTimes[settingIndex].hour);
+        break;
+    case 1:
+        lcd.print("Set Minute: ");
+        lcd.print(feedTimes[settingIndex].minute);
+        break;
+    case 2:
+        lcd.print("Set Duration: ");
+        lcd.print(feedTimes[settingIndex].duration);
+        lcd.print(" sec");
+        break;
+    }
+}
+
+void incrementSettingValue()
+{
+    switch (settingIndex)
+    {
+    case 0: // Hour
+        feedTimes[settingIndex].hour = (feedTimes[settingIndex].hour + 1) % 24;
+        break;
+    case 1: // Minute
+        feedTimes[settingIndex].minute = (feedTimes[settingIndex].minute + 1) % 60;
+        break;
+    case 2:                                                                             // Duration
+        feedTimes[settingIndex].duration = (feedTimes[settingIndex].duration + 1) % 61; // Cap duration at 60 seconds
+        break;
+    }
+    displaySettingMode();
+}
+
+void decrementSettingValue()
+{
+    switch (settingIndex)
+    {
+    case 0: // Hour
+        feedTimes[settingIndex].hour = (feedTimes[settingIndex].hour - 1 + 24) % 24;
+        break;
+    case 1: // Minute
+        feedTimes[settingIndex].minute = (feedTimes[settingIndex].minute - 1 + 60) % 60;
+        break;
+    case 2:                                                                                  // Duration
+        feedTimes[settingIndex].duration = (feedTimes[settingIndex].duration - 1 + 61) % 61; // Cap duration at 60 seconds
+        break;
+    }
+    displaySettingMode();
+}
+
+void saveSettings()
+{
+    // Save settings to memory or send over Bluetooth
+}
+// Variable to keep track of the number of feed times
+void handleButtons()
+{
+    if (digitalRead(INC_BUTTON_PIN) == LOW && !incButtonPressed)
+    {
+        incButtonPressed = true;
+        if (settingMode)
+        {
+            incrementSettingValue();
+        }
+    }
+    else if (digitalRead(DEC_BUTTON_PIN) == LOW && !decButtonPressed)
+    {
+        decButtonPressed = true;
+        if (settingMode)
+        {
+            decrementSettingValue();
+        }
+    }
+    else if (digitalRead(SET_BUTTON_PIN) == LOW && !setButtonPressed)
+    {
+        setButtonPressed = true;
+        if (!settingMode)
+        {
+            settingMode = true;
+            displaySettingMode();
+        }
+        else
+        {
+            // Exit setting mode and save settings
+            settingMode = false;
+            saveSettings();
+        }
+    }
+
+    if (digitalRead(INC_BUTTON_PIN) == HIGH)
+    {
+        incButtonPressed = false;
+    }
+    if (digitalRead(DEC_BUTTON_PIN) == HIGH)
+    {
+        decButtonPressed = false;
+    }
+    if (digitalRead(SET_BUTTON_PIN) == HIGH)
+    {
+        setButtonPressed = false;
+    }
+}
 
 time_t dailyAlarm(int hour, int minute, int second)
 {
@@ -71,8 +193,6 @@ void feedCallback()
     feed(feedIndex);
 }
 
-
-
 void processBluetoothData()
 {
     String receivedData = SerialBT.readStringUntil('\n');
@@ -104,7 +224,7 @@ void setup()
 {
     Serial.begin(9600);
     Serial.begin(9600);
-    SerialBT.begin("ESP32_BT"); // Bluetooth device name
+    SerialBT.begin("ESP32_FISH_FEEDER"); // Bluetooth device name
 
     if (!rtc.begin())
     {
@@ -138,6 +258,15 @@ void setup()
     // Alarm.timerRepeat(dailyAlarm(6, 0, 0), feed1);  // 6am for feed 1
     // Alarm.timerRepeat(dailyAlarm(12, 0, 0), feed2); // 12pm for feed 2
     // Add more alarms for additional feed times if needed
+    lcd.init();
+    lcd.backlight();
+
+    pinMode(RELAY_PIN, OUTPUT);
+    pinMode(INC_BUTTON_PIN, INPUT_PULLUP);
+    pinMode(DEC_BUTTON_PIN, INPUT_PULLUP);
+    pinMode(SET_BUTTON_PIN, INPUT_PULLUP);
+
+    Serial.println("Ready to receive data over Bluetooth");
 }
 
 void loop()
@@ -147,5 +276,5 @@ void loop()
     {
         processBluetoothData();
     }
+    handleButtons();
 }
-
